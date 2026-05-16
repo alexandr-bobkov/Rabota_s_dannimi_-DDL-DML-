@@ -425,8 +425,6 @@ DESCRIBE store;
 
 Поочередно проверяя таблицы через `DESCRIBE имя_таблицы;`, мы соберем точно такой же список первичных ключей, который автоматически сформировал наш SQL-скрипт в Способе 1. В таблицах `film_actor` и `film_category` маркер `PRI` загорится сразу в двух колонок — это означает составной первичный ключ.
 
----
-
 
 </details>
 
@@ -434,92 +432,63 @@ DESCRIBE store;
 -------
 
 <details>
-<summary><b>Задание 3. Logstash</b></summary>
+<summary><b>Задание 3.</b></summary>
+3.1. Уберите у пользователя sys_temp права на внесение, изменение и удаление данных из базы sakila.
 
-- Установите и запустите Logstash и Nginx. С помощью Logstash отправьте access-лог Nginx в Elasticsearch. 
+3.2. Выполните запрос на получение списка прав для пользователя sys_temp. (скриншот)
 
-*Приведите скриншот интерфейса Kibana, на котором видны логи Nginx.*
+*Результатом работы должны быть скриншоты обозначенных заданий, а также простыня со всеми запросами.*
+
 -------
 
 ### ОТВЕТ:
 
-### Задание 3. Logstash
+При попытке точечно забрать права `INSERT, UPDATE, DELETE` у глобального пользователя СУБД выдает ошибку `ERROR 1141 (42000): There is no such grant defined`. Это происходит потому, что в MySQL нельзя частично урезать глобальные права `*.*` на уровне одной конкретной базы данных без включения системной переменной `partial_revokes`.
 
-**1. Установка веб-сервера Nginx и конвейера обработки данных Logstash:**
-```bash
-# Установка пакетов из подключенного зеркала Яндекса и стандартных репозиториев
-sudo apt update && sudo apt install logstash nginx -y
-
-# Добавление служб в автозагрузку операционной системы
-sudo systemctl enable logstash nginx
-sudo systemctl start nginx
+**Алгоритм решения (выполняется под администратором root):**
+```sql
+REVOKE ALL PRIVILEGES, GRANT OPTION FROM 'sys_temp'@'%';
 ```
+- --Полностью сбрасываем старые глобальные права пользователя
 
-**2. Конфигурация прав доступа в ОС Linux:**
-По умолчанию файлы логов веб-сервера Nginx закрыты для чтения сторонними пользователями. Для того чтобы служба Logstash (работающая под изолированной учетной записью `logstash`) могла беспрепятственно читать поступающие события, были скорректированы права доступа на директорию и сам файл лога:
-```bash
-# Предоставление прав на чтение директории и файла конфигурации логов
-sudo chmod 755 /var/log/nginx
-sudo chmod 644 /var/log/nginx/access.log
+```sql
+GRANT CREATE, DROP, ALTER, REFERENCES, INDEX, CREATE TEMPORARY TABLES, LOCK TABLES, CREATE VIEW, SHOW VIEW, EXECUTE ON *.* TO 'sys_temp'@'%' WITH GRANT OPTION;
 ```
+- --Переназначаем права точечно: даем глобальное право на создание структур
 
-**3. Конфигурация конвейера обработки данных (Pipeline):**
-Для автоматического отслеживания изменений в access-логах веб-сервера Nginx, их парсинга (парсинга строки в JSON) и последующей безопасной передачи в Elasticsearch, был создан конфигурационный файл `/etc/logstash/conf.d/nginx.conf`:
-
-```text
-input {
-  file {
-    path => "/var/log/nginx/access.log"
-    start_position => "beginning"
-    sincedb_path => "/dev/null"
-  }
-}
-
-filter {
-  # Использование встроенного Grok-паттерна для разбора Combined Log Format веб-сервера Nginx
-  grok {
-    match => { "message" => "%{COMBINEDAPACHELOG}" }
-  }
-  # Перезапись системного таймстампа датой и временем реального совершения события
-  date {
-    match => [ "timestamp" , "dd/MMM/yyyy:HH:mm:ss Z" ]
-    target => "@timestamp"
-  }
-}
-
-output {
-  elasticsearch {
-    hosts => ["https://localhost:9200"]
-    ssl => true
-    ssl_certificate_verification => false
-    user => "elastic"
-    password => "Kz4ym_Xoj8OhHhQv-Hxr"
-    index => "logstash-nginx-%{+YYYY.MM.dd}"
-  }
-}
+```sql
+GRANT SELECT ON sakila.* TO 'sys_temp'@'%';
 ```
+- --На целевую базу данных sakila выдаем СТРОГО только право чтения данных (SELECT)
 
-**4. Инициализация конвейера и генерация тестового трафика:**
-```bash
-# Запуск конвейера Logstash
-sudo systemctl start logstash
+```sql
+FLUSH PRIVILEGES;
 
-# Искусственная генерация логов (имитация 10 последовательных запросов к веб-серверу)
-for i in {1..10}; do curl -I http://localhost/; sleep 0.5; done
 ```
+- --Фиксируем настройки в памяти сервера
 
-**5. Проверка поступления данных и визуализация в Kibana:**
-Успешное создание индекса верифицировано в Dev Tools запросом `GET _cat/indices?v`. Для отображения структурированных логов на вкладке `Discover` в Kibana было создано представление данных (**Data View**) со следующими параметрами:
-* **Name:** `Логи Nginx`
-* **Index pattern:** `logstash-nginx-*`
-* **Timestamp field:** `@timestamp`
+```sql
+SHOW GRANTS FOR 'sys_temp'@'%';
+```
+- --Запускаем проверку прав для скриншота
 
-Сырые текстовые строки лога были успешно декомпозированы на атомарные аналитические поля: `clientip`, `verb`, `request`, `http.response.status_code` (`response`), `bytes`.
+**Скриншот прав доступа:**
 
-**Скриншот интерфейса Kibana с логами Nginx, отправленными через Logstash:**
+![Скриншот прав дотупа](./img/8.jpg)
 
-![Логи Nginx через Logstash](./img/3.jpg)
+<details>
+<summary><b>"Портянка"</b></summary>
 
+- --Сброс и точечное переназначение прав для блокировки INSERT, UPDATE, DELETE в sakila
+REVOKE ALL PRIVILEGES, GRANT OPTION FROM 'sys_temp'@'%';
+GRANT CREATE, DROP, ALTER, REFERENCES, INDEX, CREATE TEMPORARY TABLES, LOCK TABLES, CREATE VIEW, SHOW VIEW, EXECUTE ON *.* TO 'sys_temp'@'%' WITH GRANT OPTION;
+GRANT SELECT ON sakila.* TO 'sys_temp'@'%';
+FLUSH PRIVILEGES;
+
+- --Финальная проверка урезанных прав пользователя
+SHOW GRANTS FOR 'sys_temp'@'%';
+
+</details>
 
 
 </details>
@@ -527,204 +496,3 @@ for i in {1..10}; do curl -I http://localhost/; sleep 0.5; done
 ------
 ------
 
-
-<details>
-<summary><b>Задание 4. Filebeat.</b></summary>
-
-- Установите и запустите Filebeat. Переключите поставку логов Nginx с Logstash на Filebeat. 
-
-*Приведите скриншот интерфейса Kibana, на котором видны логи Nginx, которые были отправлены через Filebeat.*
-
-### ОТВЕТ:
-
-**1. Отключение предыдущего конвейера и установка Filebeat:**
-```bash
-sudo systemctl stop logstash
-sudo apt update && sudo apt install filebeat -y
-```
-
-**2. Конфигурация защищенного агента доставки:**
-Вся конфигурация сбора и прямой отправки данных настроена в файле `/etc/filebeat/filebeat.yml`. Для обхода проблем парсинга YAML-отступов на стороне агента, авторизация интегрирована методом HTTP Basic Auth напрямую в строку адреса хоста:
-
-```yaml
-filebeat.inputs:
-- type: log
-  enabled: true
-  paths:
-    - /var/log/nginx/access.log
-
-output.elasticsearch:
-  hosts: ["https://elastic:Kz4ym_Xoj8OhHhQv-Hxr@localhost:9200"]
-  ssl.verification_mode: "none"
-  index: "filebeat-nginx-%{[agent.version]}-%{+yyyy.MM.dd}"
-
-setup.template.name: "filebeat"
-setup.template.pattern: "filebeat-*"
-setup.ilm.enabled: false
-```
-
-**3. Запуск агента и генерация новых событий:**
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable filebeat
-sudo systemctl start filebeat
-
-# Искусственная генерация свежих логов для проверки доставки через Filebeat
-for i in {1..5}; do curl -I http://localhost/; done
-```
-
-Регистрация данных в Elasticsearch успешно подтверждена диагностической командой проверки выходного сетевого буфера `filebeat test output` со статусом `talk to server... OK`.
-
-**Скриншот интерфейса Kibana с логами Nginx от Filebeat:**
-![Логи Nginx через Filebeat](./img/4.jpg)
-
-
-
-
-</details>
-
------
------
-
-
-<details>
-<summary><b>Задание 5*. Доставка данных</b></summary>
-
-- Настройте поставку лога в Elasticsearch через Logstash и Filebeat любого другого сервиса , но не Nginx. 
-- Для этого лог должен писаться на файловую систему, Logstash должен корректно его распарсить и разложить на поля. 
-
-*Приведите скриншот интерфейса Kibana, на котором будет виден этот лог и напишите лог какого приложения отправляется.*
-
-
-### ОТВЕТ:
- 
----
-
-
-**У меня Debian 13:**
-
-Чтобы собрать эти логи, необходимо настроить следующую цепочку:
-1. **Filebeat** заглядывает в  системный журнал, забирает оттуда логи безопасности и пересылает их в Logstash.
-2. **Logstash** принимает этот текст, режет его на понятные части (дата, имя программы, текст ошибки) и отправляет в базу Elasticsearch.
-3. **Elasticsearch** сохраняет эти данные в специальную папку (индекс) `auth-secure-logs-*`.
-4. **Kibana** показывает все.
-
----
-
-#### 1. Настройка Filebeat (`/etc/filebeat/filebeat.yml`)
-
-Очистил файл конфигурации и указал Filebeat собирать логи Nginx (из прошлого задания) и системные логи авторизации (через модуль `journald`). Всё это отправляется на порт `5044`, где его ждет Logstash.
-
-```yaml
-filebeat.inputs:
-- type: log
-  enabled: true
-  paths:
-    - /var/log/nginx/access.log
-  tags: ["nginx"]
-
-- type: journald
-  enabled: true
-  id: os-security-journal
-  # Собираем логи только от программ, отвечающих за вход в систему (ssh, su, sudo)
-  include_units:
-    - ssh
-    - sshd
-    - su
-    - sudo
-    - systemd-logind
-  tags: ["system-auth"]
-
-# Отправляем все собранные данные в Logstash
-output.logstash:
-  hosts: ["localhost:5044"]
-```
-
----
-
-#### 2. Настройка Logstash (`/etc/logstash/conf.d/nginx.conf`)
-
-Logstash настроен так, чтобы он слушал порт `5044`, принимал логи от Filebeat и раскладывал их по разным папкам в Elasticsearch, используя наш пароль `Kz4ym_Xoj8OhHhQv-Hxr`.
-
-```text
-input {
-  beats {
-    port => 5044
-  }
-}
-
-filter {
-  # Если это логи от Nginx — разбираем их как логи сайта
-  if "nginx" in [tags] {
-    grok {
-      match => { "message" => "%{COMBINEDAPACHELOG}" }
-    }
-  }
-  
-  # Если это логи системы — разбиваем их на дату, имя программы и текст ошибки
-  if "system-auth" in [tags] {
-    grok {
-      match => { "message" => "%{POSTFIX_QUEUEID:syslog_timestamp}? %{HOSTNAME:syslog_hostname} %{DATA:syslog_program}(?:\[%{POSINT:syslog_pid}\])?: %{GREEDYDATA:syslog_message}" }
-    }
-  }
-}
-
-output {
-  # Логи сайта отправляем в одну папку
-  if "nginx" in [tags] {
-    elasticsearch {
-      hosts => ["https://localhost:9200"]
-      ssl => true
-      ssl_certificate_verification => false
-      user => "elastic"
-      password => "Kz4ym_Xoj8OhHhQv-Hxr"
-      index => "filebeat-nginx-%{+YYYY.MM.dd}"
-    }
-  }
-  
-  # Логи безопасности системы отправляем в другую папку
-  if "system-auth" in [tags] {
-    elasticsearch {
-      hosts => ["https://localhost:9200"]
-      ssl => true
-      ssl_certificate_verification => false
-      user => "elastic"
-      password => "Kz4ym_Xoj8OhHhQv-Hxr"
-      index => "auth-secure-logs-%{+YYYY.MM.dd}"
-    }
-  }
-}
-```
-
----
-
-#### 3. Как проверяли работу счетчика
-
-После запуска Logstash открыл порт `5044`. Чтобы проверить, что система видит наши логи, специально создаем ошибку входа — в терминале переключался на пользователя, которого не существует, и ввел случайный пароль:
-
-```bash
-su неверный_пользователь
-```
-
-Система Debian зафиксировала эту ошибку, Filebeat сразу же передал её в Logstash, а тот записал в базу. 
-
-В меню **Dev Tools** в Kibana ввел команду проверки папок:
-```text
-GET _cat/indices/auth-*?v
-```
-
-База ответила, что папка успешно создана и в неё уже записалось **15 строк с системными логами**:
-```text
-health status index                       docs.count   store.size
-yellow open   auth-secure-logs-2026.05.14         15      143.4kb
-```
-
-Затем перешел в настройки Kibana (**Stack Management -> Data Views**), создал шаблон с именем `auth-secure-logs-*` и открыл вкладку **Discover**. В таблице видны системные сообщения об ошибках входа.
-
-**Скриншот интерфейса Kibana со структурированными системными логами:**
-![Сбор кастомных логов](./img/5.jpg)
-
-
-
-
-</details>
